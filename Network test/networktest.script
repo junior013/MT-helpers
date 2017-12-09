@@ -1,0 +1,79 @@
+############################################################################
+#
+# Testing network bandwidth and ping time and sending results in e-mail
+#
+# Set your server and e-mail parameters before use!!!
+#
+# You can run it periodically from scheduler, like this:
+# /system scheduler add name=NetTest_hourly interval=1h start-time=startup \
+# on-event="/system script run networktest" policy=read,test
+#
+############################################################################
+
+## Test server parameters
+:local server "50.235.23.218"
+:local user "btest"
+:local password "btest"
+
+## E-mail parameters
+:local email "your@email.address"
+:local smtp "smtp.your.domain"
+
+## Some test parameters
+:local protocol "udp"
+:local duration "10s"
+:local pingcount "5"
+
+############################################################################
+# Don't change anything below this line!
+
+:local rxta
+:local rxtaA
+:local rxtaB
+:local rxtaC
+
+:local txta
+:local txtaA
+:local txtaB
+:local txtaC
+
+:local avgRtt
+:local pin
+:local pout
+
+# Get system time and identity
+:local sysname [/system identity get name]
+:local datetime "$[/system clock get date] $[/system clock get time]"
+
+:log info "Network-test start"
+
+# Ping test
+/tool flood-ping address=$server count=$pingcount do={
+	:if ($"sent" = $pingcount) do={
+		:set avgRtt $"avg-rtt"
+		:set pout $sent
+		:set pin $received
+	}
+}
+:local ploss (100 - (($pin * 100) / $pout))
+
+# Bandwidth test
+/tool bandwidth-test $server duration=$duration direction=both user=$user password=$password protocol=$protocol random-data=yes do={
+	:if ($status="running") do={
+		:set rxtaA ($"rx-total-average" / 1000)
+		:set rxtaB ($rxtaA / 1000 * 1000)
+		:set rxtaC ($rxtaA - $rxtaB)
+		:set rxtaB ($rxtaB / 1000)
+		:set rxta "$rxtaB.$rxtaC"
+		:set txtaA ($"tx-total-average" / 1000)
+		:set txtaB ($txtaA / 1000 * 1000)
+		:set txtaC ($txtaA - $txtaB)
+		:set txtaB ($txtaB / 1000)
+		:set txta "$txtaB.$txtaC"
+	}
+}
+
+:log info "Network-test done, e-mail-ing results (ping avg: $avgRtt ms, pkt loss: $ploss%, TX avg: $txta Mbps/s, RX avg: $rxta Mbps/s)"
+
+# E-mail results
+/tool e-mail send to=$email server=$smtp subject="Network-test done : $sysname" body="$sysname \n  $datetime \n \n Result : \n Ping average: $avgRtt ms \n Packet loss: $ploss % \n TX total $duration average: $txta Mbps/s \n RX total $duration average: $rxta Mbps/s"
